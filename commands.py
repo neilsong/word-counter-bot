@@ -1,3 +1,4 @@
+from discord import channel, message
 from discord.ext import commands
 import discord
 
@@ -6,9 +7,13 @@ import datetime
 import time
 import pprint
 import sys
+import re
+import copy
+from disputils import BotEmbedPaginator
 
-from main import custom_prefixes, default_prefixes
+from main import *
 from decorator import *
+from utilities import *
 
 def find_color(ctx):
     # Find the bot's rendered color. If default color or in a DM, return Discord's grey color
@@ -23,6 +28,7 @@ def find_color(ctx):
     return color
 
 
+
 class Commands(commands.Cog):
     # Commands for the Word Counter Bot
 
@@ -30,27 +36,42 @@ class Commands(commands.Cog):
         self.bot = bot
 
     @commands.command()
-    @banFromChannel()
+    @isAllowed()
+    @commands.guild_only()
     async def help(self, ctx):
 
         cmds = sorted([c for c in self.bot.commands if not c.hidden], key=lambda c: c.name)
-
+        
+        description = "I keep track of every word a user says. I'm a pretty simple bot to use. My prefix"
+        if len(self.bot.prefixes[str(ctx.guild.id)]) > 1:
+            description+="es are "
+            for i in self.bot.prefixes[str(ctx.guild.id)]:
+                if i == self.bot.prefixes[str(ctx.guild.id)][len(self.bot.prefixes[str(ctx.guild.id)])-1]:
+                    description += f"and `{i}`"
+                else:  
+                    description += f"`{i}`" 
+                    if len(self.bot.prefixes[str(ctx.guild.id)]) > 2:
+                        description += ", "
+                    else:
+                        description += " "
+        elif len(self.bot.prefixes[str(ctx.guild.id)]) == 1:
+            description += f" is `{self.bot.prefixes[str(ctx.guild.id)][0]}`"
+        else:
+            description += " is `!`"
+        description += "\n\nHere's a short list of my commands:"
         embed = discord.Embed(
             title="Word Counter Bot: Help Command",
-            description="I keep track of every word a user says. I'm a "
-                        "pretty simple bot to use. My prefix is an @mention, meaning you'll have "
-                        f"to put {self.bot.user.mention} before every command."
-                        "\n\nHere's a short list of my commands:",
+            description= description,
             color=find_color(ctx))
         embed.set_footer(
             text="Note: I don't count words said in the past before I joined this server")
         for c in cmds:
             embed.add_field(name=c.name, value=c.help, inline=False)
-
+ 
         await ctx.send(embed=embed)
 
     @commands.command(aliases=["info"])
-    @banFromChannel()
+    @isAllowed()
     async def about(self, ctx):
         # Some basic info about this bot
 
@@ -59,7 +80,13 @@ class Commands(commands.Cog):
             f"\n\n**User/Client ID**: {self.bot.app_info.id}", color=find_color(ctx))
 
         embed.set_thumbnail(url=self.bot.app_info.icon_url)
-        embed.add_field(name="Owner", value=self.bot.app_info.owner)
+        from config import ADMINS
+        tadmins = ADMINS.copy()
+        for i in range(0, len(tadmins)):
+            tadmins[i] = await self.bot.fetch_user(tadmins[i])
+        tadmins = wordListToString(tadmins)
+        tadmins = tadmins.replace('`', '')
+        embed.add_field(name="Admins", value=tadmins)
         embed.add_field(name="Server Count", value=len(self.bot.guilds))
         embed.add_field(name="User Count", value=len(self.bot.users))
         embed.add_field(
@@ -71,172 +98,16 @@ class Commands(commands.Cog):
             name="License",
             value="MIT")
         embed.add_field(
-            name="Source Code", value="https://github.com/neilsong/bot-word-counter", inline=False)
+            name="Source Code", value="https://github.com/neilsong/word-counter-bot", inline=False)
+        embed.add_field(
+            name="Contributors", value="https://bit.ly/3cWYlsn", inline=False)
         embed.add_field(
             name = "Distant Cousin", value="https://github.com/NWordCounter/bot", inline=False)
 
         await ctx.send(embed=embed)
 
     @commands.command()
-    @banFromChannel()
-    async def countserver(self, ctx):
-        try:
-            words=self.bot.serverWords[ctx.guild.id]
-        except:
-            return await ctx.send("Nothing found? Something must have gone wrong.")
-        
-        counter=0
-
-        words={k: v for k, v in sorted(words.items(), key=lambda item: item[1],reverse=True)}
-        for w in words:
-            if w=="__id":
-                continue
-            counter+=words[w]
-        ct=0
-        desc="\n"
-        for w in words:
-            if w=="__id":
-                continue
-            ct+=1
-            desc+="\n**"+ str(ct) + ". " + w+"** - "+str(words[w])
-            if ct==10:
-                break
-
-        embed = discord.Embed(
-            title="The Server\'s Word Leaderboard",
-            description=str(len(words)-1)+" distinct words have been said, with "+str(counter)+" words said in total. (Only showing top 10)"+desc,
-            color=find_color(ctx))
-
-        embed.set_footer(text="Note: I don't count words said in the past before I joined this server")
-        
-        await ctx.send(embed=embed)
-
-    @commands.command()
-    @banFromChannel()
-    async def prefix(self, ctx):
-        await ctx.send("The prefix(es) for this bot as of now are: "+ (' '.join(default_prefixes) + ' ' + ' '.join(custom_prefixes)))
-
-
-    @commands.command()
-    @banFromChannel()
-    async def count(self, ctx, user=None):
-        # Get the number of times a user has said any word
-        # Format like this: `count <@mention user>`
-        # If requester doesn't mention a user, the bot will get requester's count
-        #user=user.lower()
-        #if user=="server":
-        #    return countserver(self,ctx)
-        #if user="global":
-        #    user='0'
-
-        if user is None:
-            user = ctx.author
-        elif user == self.bot.user:
-            return await ctx.send("Man, why would I count my own words?")    
-        elif user.bot:
-            return await ctx.send("I don't count words said by bots.")
-
-        if not (user == self.bot.user):
-            try:
-                words=self.bot.userWords[user.id]
-            except:
-                return await ctx.send(f"{user.mention} hasn't said anything that I have logged yet.")
-        
-        counter=0
-
-        words={k: v for k, v in sorted(words.items(), key=lambda item: item[1],reverse=True)}
-        for w in words:
-            if w=="__id":
-                continue
-            counter+=words[w]
-
-        ct=0
-        desc="\n"
-        for w in words:
-            if w=="__id":
-                continue
-            ct+=1
-            desc+="\n**"+ str(ct) + ".  " + w+"** - "+str(words[w])
-            if ct==10:
-                break
-
-        embed = discord.Embed(
-            title=user.name+"\'s Word Counts",
-            description=str(len(words)-1)+" distinct words have been said, with "+str(counter)+" words said in total. (Only showing top 10)"+desc,
-            color=find_color(ctx))
-
-        embed.set_footer(text="Note: I don't count words said in the past before I joined this server")
-        
-        await ctx.send(embed=embed)
-
-
-
-    @count.error
-    async def count_error(self, ctx, exc):
-        if isinstance(exc, commands.BadArgument):
-            return await ctx.send(exc)
-
-    @commands.command()
-    @banFromChannel()
-    async def readhistory(self, ctx):
-        async for msg in ctx.channel.history(limit=300):
-            msgcontent = msg.content.replace("\n", " ")
-            print("History: " + msgcontent)
-            trashCharacters=[".","/","\\","\"","]","[","|","_","+","{","}",",","= ","*","&","^","~","`","?", "$"]
-            for w in trashCharacters:
-                msgcontent = msgcontent.replace(w, " ")
-            msgcontent=' '.join(msgcontent.split())
-            msgcontent=msgcontent.lower()
-            
-            result= msgcontent.split(" ")
-            #result = listToString(result).split("\n")
-            #print(result)
-
-            # print(msgcontent)
-            # print(self.bot.userLastMsg.get(msg.author.id,''))
-
-            if result[0]=="":
-                return
-            if self.bot.userLastMsg.get(msg.author.id,'') == msgcontent:
-                return
-            self.bot.userLastMsg.update({msg.author.id : msgcontent})
-
-            for w in result:
-                #print(w)
-                #print("\n")    
-                if msg.guild.id not in self.bot.serverWords:
-                    self.bot.serverWords.update({msg.guild.id: { w: 0, "__id": msg.guild.id }})
-                elif w not in self.bot.serverWords[msg.guild.id]:
-                    self.bot.serverWords[msg.guild.id].update({ w: 0, "__id": msg.guild.id })
-                self.bot.serverWords[msg.guild.id][w] += 1
-
-
-                if msg.author.id not in self.bot.userWords:
-                    self.bot.userWords.update({msg.author.id: { w: 0, "__id": msg.author.id }})
-                elif w not in self.bot.userWords[msg.author.id]:
-                    self.bot.userWords[msg.author.id].update({ w: 0, "__id": msg.author.id })
-                self.bot.userWords[msg.author.id][w] += 1
-
-
-                if 0 not in self.bot.serverWords:
-                    self.bot.serverWords.update({ 0: { w: 0, "__id": 0}})
-                elif w not in self.bot.serverWords[0]:
-                    self.bot.serverWords[0].update({ w: 0, "__id": 0})
-                self.bot.serverWords[0][w] += 1
-    
-
-
-    @commands.command()
-    @banFromChannel()
-    async def invite(self, ctx):
-        # Sends an invite link
-
-        await ctx.send("Here's my invite link so I can count words on your server too:\n"
-                       f"https://discordapp.com/oauth2/authorize?client_id={self.bot.app_info.id}"
-                       "&scope=bot&permissions=8")
-
-    @commands.command()
-    @banFromChannel()
+    @isAllowed()
     async def stats(self, ctx):
         # View stats
 
@@ -298,82 +169,289 @@ class Commands(commands.Cog):
 
         await ctx.send(embed=embed)
 
-    @commands.command(aliases=["leaderboard", "high"])
-    @commands.guild_only()
-    @banFromChannel()
-    async def top(self, ctx, word: str=None, isGlobal: str=None):
-        # See the leaderboard of the top users of this server for this word. Do `top global` to see the top users across all servers
-        # Note: If a user said any words on another server that this bot is also on, those will be taken into account
-        if word==None:
-            return await ctx.send("Please type a word to search for.\n Ex: `!top lol`")
 
-        await ctx.channel.trigger_typing()
-        leaderboard = {}
-        if isGlobal == "global":
-            for u, c in self.bot.userWords.items():
-                try:
-                    leaderboard.update({self.bot.get_user(u): c[word]})
-                except:
-                    continue
-            leaderboard = dict(collections.Counter(leaderboard).most_common(10))
-        else:
-            async for user in ctx.guild.fetch_members(limit=None):
-                try:
-                    leaderboard.update({user: self.bot.userWords[user.id][word]})
-                except:
-                    continue
-            leaderboard = dict(collections.Counter(leaderboard).most_common(10))
-
-        if not len(leaderboard):
-            return await ctx.send("No one on this server has said this word yet")
-
+    async def makeEmbed(self,ctx,words,pageNum,user,word):
+        
         description = "\n"
         counter = 1
-        for m, c in leaderboard.items():
-            description += (f"**{counter}.** {m if word == 'global' else m.mention} - __{c:,} "
+        for m, c in words.items():
+            description += (f"**{counter+pageNum*15}.** {m.mention if user == 'top' else m} - __{c:,} "
                             f"time{'' if c == 1 else 's'}__\n")
             counter += 1
 
         description = description.replace("**1.**", ":first_place:").replace("**2.**", ":second_place:").replace("**3.**", ":third_place:")
 
-        embed = discord.Embed(description=description, color=find_color(ctx),
-                              timestamp=datetime.datetime.utcnow())
-        if isGlobal == "global":
+        embed = discord.Embed(description=description, color=find_color(ctx),timestamp=datetime.datetime.utcnow())
+        
+        if user == "server":
             embed.set_author(
-                name=f"Top Users of \"{word}\"")
+            name="The Server\'s Most Common Words", icon_url=ctx.guild.icon_url)
+        elif user == "global":
+            embed.set_author(
+            name="Global Most Common Words")
+        elif user == "top":
+            embed.set_author(
+            name=f"Top Users of \"{word}\" in {ctx.guild.name}", icon_url=ctx.guild.icon_url)
+        elif user == "topglobal":
+            embed.set_author(
+            name=f"Top 10 Users of \"{word}\"")
         else:
             embed.set_author(
-                name=f"Top Users of \"{word}\" in {ctx.guild.name}", icon_url=ctx.guild.icon_url)
+            name=f"{user.name}'s Most Common Words", icon_url=user.avatar_url)
 
         embed.set_footer(
             text="These listings are accurate as of ", icon_url=self.bot.user.avatar_url)
+        return embed
 
-        await ctx.send(embed=embed)
+    @commands.command()
+    @isAllowed()
+    async def invite(self, ctx):
+        # Sends an invite link
 
-    @top.error
-    async def top_error(self, ctx, exc):
-        if isinstance(exc, commands.NoPrivateMessage):
-            return await ctx.send(exc)
+        await ctx.send("Here's my invite link so I can count words on your server too:\n"
+                       f"https://discordapp.com/oauth2/authorize?client_id={self.bot.app_info.id}"
+                       "&permissions=67501120&scope=bot")
+
+    @commands.command()
+    @isAllowed()
+    async def count(self, ctx, user=None,):
+        # Get the number of times a user has said any word
+        # Format like this: `count <@mention user>`
+        # If requester doesn't mention a user, the bot will get requester's count
+        # If requester has global as argument, the bot will get the gobal count
+        embeds = 0
+
+        if(user=="server"):
+            dict = []
+            try: 
+                dict = self.bot.serverWords[ctx.guild.id]
+            except:
+                return await ctx.send(f"I haven't logged anything in this server yet.")
+            
+            embeds = await count(dict, "server", ctx, self)
+
+        elif(user=="global"):
+            dict = []
+            try: 
+                dict = self.bot.serverWords[0]
+            except:
+                return await ctx.send(f"I haven't logged anything yet.")
+            
+            embeds = await count(dict, "global", ctx, self)
+        else:
+            if not user is None:
+                try:
+                    user=self.bot.get_user(int(re.sub("[^0-9]", "", user)))
+                except:
+                    return await ctx.send("Not a valid user.")
+
+            if user is None:
+                user = ctx.author
+            elif user == self.bot.user:
+                return await ctx.send("Man, why would I count my own words?")    
+            elif user.bot:
+                return await ctx.send("I don't count words said by bots.")
+            
+            dict = []
+            try: 
+                dict = self.bot.userWords[user.id]
+            except:
+                return await ctx.send(f"{user.mention} hasn't said anything that I have logged yet.")
+            
+            embeds = await count(dict, user, ctx, self)
+
+        if isinstance(embeds, list):
+            paginator = BotEmbedPaginator(ctx, embeds)
+            await paginator.run()      
+
+    @commands.command(aliases=["leaderboard", "high"])
+    @commands.guild_only()
+    @isAllowed()
+    async def top(self, ctx, word: str=None, isGlobal: str=""):
+        # See the leaderboard of the top users of this server for this word. Do `top global` to see the top users across all servers
+        # Note: If a user said any words on another server that this bot is also on, those will be taken into account
+        if word==None:
+            return await ctx.send(f"Please type a word to search for. Ex: `{get_prefix[0]}top lol`")
+        try:
+            if word in self.bot.filter[str(ctx.guild.id)]:
+                return await ctx.send("That word is filtered")
+        except: pass
+        if isGlobal and not isGlobal == "global":
+            return await ctx.send(f"If you are trying to get the global leaderboard, do `{get_prefix[0]}top lol global`")
+        word=word.lower();
+        await ctx.channel.trigger_typing()
+
+        embeds = 0
+        embeds = await leaderboard(self, ctx, word, isGlobal)
+        
+        if isinstance(embeds, list):
+            paginator = BotEmbedPaginator(ctx, embeds)
+            await paginator.run()
+
+
+    #@count.error
+    #async def count_error(self, ctx, exc):
+    #    if isinstance(exc, commands.BadArgument):
+    #        return await ctx.send(exc)
+
+    # @commands.command()
+    # @isAllowed()
+    # async def readhistory(self, ctx):
+    #     async for msg in ctx.channel.history(limit=300):
+    #         msgcontent = msg.content.replace("\n", " ")
+    #         print("History: " + msgcontent)
+    #         await main.updateWord(message)
+
+
+    @commands.command()
+    @isAllowed()
+    @commands.guild_only()
+    async def prefix(self, ctx):
+        description = "My prefix"
+        if len(self.bot.prefixes[str(ctx.guild.id)]) > 1:
+            description+="es: "
+            description += wordListToString(self.bot.prefixes[str(ctx.guild.id)])
+        elif len(self.bot.prefixes[str(ctx.guild.id)]) == 1:
+            description += ": "
+            description += wordListToString(self.bot.prefixes[str(ctx.guild.id)])
+        else:
+            description += ": `!`"
+        await ctx.send(description)
+
+    @commands.command()
+    @commands.guild_only()
+    @isAllowed()
+    @commands.has_permissions(manage_guild=True)
+    async def setprefix(self, ctx, *, prefixes=""):
+        if len(prefixes) > 0:
+            prefixlist = prefixes.split(" ")
+            self.bot.prefixes.update({str(ctx.guild.id): prefixlist})
+            if len(prefixlist) > 1:
+                await ctx.send("Prefixes set")
+            else:
+                await ctx.send("Prefix set")
+        else:
+            await ctx.send("Please set either a one-character prefix, or multiple one-character prefixes separated by spaces")
+
+    @commands.command()
+    @commands.guild_only()
+    @isAllowed()
+    @commands.has_permissions(manage_guild=True)
+    async def removeblacklist(self, ctx, *, channels):
+        response = ""
+        channels = channels.replace("<", "").replace("#", "").replace(">", "").split(" ")
+        if len(channels) > 0: 
+            for i in channels:
+                state = removeItem(self.bot.blacklist, i, ctx.guild.id)
+                if state > 0:
+                    response += f"<#{i}> removed\n"
+                    if state > 1:
+                        response += f"The blacklist is now empty\n"
+                else:
+                    response += f"<#{i}> not blacklisted\n"
+        else:
+            response += "Please provide either a channel, or multiple channels separated by spaces"
+        await ctx.send(response)
+
+    @commands.command()
+    @commands.guild_only()
+    @isAllowed()
+    @commands.has_permissions(manage_guild=True)
+    async def addblacklist(self, ctx, *, channels):
+        response = ""
+        channels = channels.replace("<", "").replace("#", "").replace(">", "").split(" ")
+        if len(channels) > 0: 
+            for i in channels:
+                if addItem(self.bot.blacklist, i, ctx.guild.id):
+                    response += f"<#{i}> added\n"
+                else: 
+                    response += f"<#{i}> already blacklisted\n"
+
+                
+        else:
+            response += "Please provide either a channel, or multiple channels separated by spaces"
+        await ctx.send(response)
+        
+    @commands.command()
+    @isAllowed()
+    @commands.guild_only()
+    async def blacklist(self, ctx):
+        blacklist = "Currently blacklisted channel"
+        if not str(ctx.guild.id) in self.bot.blacklist.keys():
+            await ctx.send("There is no blacklist for this server")
+            return
+        blacklist += channelListToString(self.bot.blacklist[str(ctx.guild.id)])
+        await ctx.send(blacklist)
+
+    @commands.command()
+    @commands.guild_only()
+    @isAllowed()
+    @commands.has_permissions(manage_guild=True)
+    async def removefilter(self, ctx, *, words=""):
+        words = preprocessWords(words)
+        
+        response = ""
+        if len(words) > 0:
+            wordlist = words.split(" ")
+            for i in wordlist:
+                if i in defaultFilter:
+                    response += f"`{i}` is in the default filter\n"
+                    continue
+                state = removeItem(self.bot.filter, i, ctx.guild.id)
+                if state > 0:
+                    response += f"`{i}` removed\n"
+                    if state > 1:
+                        response += f"The filter is now empty\n"
+                else:
+                    response += f"`{i}` is not in the filter\n"
+        else:
+            response += "Please remove either one word, or multiple words separated by spaces"
+        
+        await ctx.send(response)
 
 
     @commands.command()
     @commands.guild_only()
-    @banFromChannel()
-    async def setprefix(self, ctx, *, prefixes=""):
-        if len(prefixes) > 0:
-             custom_prefixes.clear
-             custom_prefixes.append(prefixes + " " if len(prefixes) != 1 else prefixes)
-             await ctx.send("Prefixes set!")
-        
+    @isAllowed()
+    @commands.has_permissions(manage_guild=True)
+    async def addfilter(self, ctx, *, words=""):
+        words = preprocessWords(words)
+
+        response = ""
+        if len(words) > 0:
+            wordlist = words.split(" ")
+            for i in wordlist:
+                if i in defaultFilter:
+                    response += f"`{i}` is in the default filter\n"
+                    continue
+                if addItem(self.bot.filter, i, ctx.guild.id):
+                    response += f"`{i}` added\n"
+                else:
+                    response += f"`{i}` already in filter\n"
         else:
-             await ctx.send("Please set a one-character prefix")
+            response += "Please add either one word, or multiple words separated by spaces"
+
+        await ctx.send(response)
         
+    @commands.command()
+    @isAllowed()
+    @commands.guild_only()
+    @commands.has_permissions(manage_guild=True)
+    async def filter(self, ctx):
+        filter = "Current filter: "
+        if not str(ctx.guild.id) in self.bot.filter.keys():
+            await ctx.send("There is no filter for this server")
+            return
+        filter += wordListToString(self.bot.filter[str(ctx.guild.id)])
+        await ctx.send(filter)
 
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
-
+    # BOT ADMIN COMMANDS
     @commands.command(hidden=True)
     @isaBotAdmin()
-    @banFromChannel()
+    @isAllowed()
     async def edituser(self, ctx, user_id: int, word: str=None, count: int=0):
         # Edit a user's entry in all collections or add a new one
         if not user_id or not word or not count:
@@ -385,7 +463,7 @@ class Commands(commands.Cog):
         except:
             change = count
         
-        if (count == 0):
+        if count == 0:
             try: self.bot.userWords[user_id].pop(word)
             except: pass
         
@@ -394,10 +472,26 @@ class Commands(commands.Cog):
         self.bot.serverWords[0][word] += change
         
         await ctx.send("Done")
-
+        
+    @commands.command(hidden=True)
+    @isaBotAdmin()
+    @isAllowed()
+    async def popdefaultfilter(self, ctx):
+        for i in defaultFilter:
+            for u in self.bot.userWords.keys():
+                try: self.bot.userWords[u].pop(i)
+                except: continue
+            for u in self.bot.serverWords.keys():
+                try: self.bot.serverWords[u].pop(i)
+                except: continue
+            try: self.bot.serverWords[0].pop(i)
+            except: pass
+            await self.bot.collection.update_many({},{"$unset":{i:1}})
+        await ctx.send("Done")
     
     @commands.command(hidden=True)
     @isaBotAdmin()
+    @isAllowed()
     async def popword(self, ctx, word: str=None):
         # Pop a word from all collections
 
@@ -407,11 +501,15 @@ class Commands(commands.Cog):
         for u in self.bot.serverWords:
             try: self.bot.serverWords[u].pop(word)
             except: continue
+        try: self.bot.serverWords[0].pop(word)
+        except: pass
+        await self.bot.collection.update_many({},{"$unset":{word:1}})
         await ctx.send("Done")
 
     @commands.command(hidden=True)
     @isaBotAdmin()
-    @banFromChannel()
+    @commands.guild_only()
+    @isAllowed()
     async def popuser(self, ctx, user_id: int):
         # Pop a user from all collections
 
@@ -426,23 +524,23 @@ class Commands(commands.Cog):
             await ctx.send(f"User `{e}` does not exist or has no words logged yet.")
 
 
-    @commands.command(hidden=True)
-    @isaBotAdmin()
-    @banFromChannel()
-    async def execute(self, ctx, *, query):
-        """Execute a query in the database"""
+    # @commands.command(hidden=True)
+    # @isaBotAdmin()
+    # @isAllowed()
+    # async def execute(self, ctx, *, query):
+    #     """Execute a query in the database"""
 
-        try:
-            with ctx.channel.typing():
-                async with self.bot.pool.acquire() as conn:
-                    result = await conn.execute(query)
-            await ctx.send(f"Query complete:```{result}```")
-        except Exception as e:
-            await ctx.send(f"Query failed:```{e}```")
+    #     try:
+    #         with ctx.channel.typing():
+    #             async with self.bot.pool.acquire() as conn:
+    #                 result = await conn.execute(query)
+    #         await ctx.send(f"Query complete:```{result}```")
+    #     except Exception as e:
+    #         await ctx.send(f"Query failed:```{e}```")
 
     @commands.command(aliases=["resetstatus"], hidden=True)
     @isaBotAdmin()
-    @banFromChannel()
+    @isAllowed()
     async def restartstatus(self, ctx):
         await self.bot.change_presence(status=discord.Status.dnd, activity=discord.Activity(
             name=f"any Words on {len(self.bot.guilds)} servers",
@@ -452,7 +550,7 @@ class Commands(commands.Cog):
 
     @commands.command(hidden=True)
     @isaBotAdmin()
-    @banFromChannel()
+    @isAllowed()
     async def setstatus(self, ctx, status):
         """Change the bot's presence"""
 
@@ -468,13 +566,6 @@ class Commands(commands.Cog):
             await ctx.send("Invalid status")
 
         await ctx.send("Set new status")
-
-    @commands.command(hidden=True)
-    @isaBotAdmin()
-    @banFromChannel()
-
-    async def updatedb(self, ctx):
-        self.bot.update_db()
 
 def setup(bot):
     bot.add_cog(Commands(bot))

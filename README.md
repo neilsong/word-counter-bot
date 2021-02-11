@@ -1,10 +1,10 @@
-# word-counter-bot (v0.1-alpha)
+# word-counter-bot (v0.2-alpha)
 
 Kanban: https://app.gitkraken.com/glo/board/X_1FdLw5GgAS4oFE  
-Dev: https://github.com/neilsong/word-counter-bot-dev  
+Dev: https://github.com/neilsong/word-counter-bot-dev
 ## Description
 
-**A Python Discord Bot for Word Counting, Analytics, and Insights**
+**A Python Discord Bot for Word Counting, Linguistics Analytics, and Vocabulary Insights**
 
 Currently, we are trying our best to deliver a stable beta release with all the features we wish to include. This repo will serve as version control for releases.
 
@@ -14,20 +14,20 @@ Currently, we are trying our best to deliver a stable beta release with all the 
         - Leaderboard of most common words in the server
         - Your own personal leaderboard of most common words
 
-  2. (Possibly) Create an AI model that will mimic your style to send a message you would probably send on command
+  2. (Next major feature) Create an AI model that will mimic your style to send a message you would probably send on command
 
-  3. (Very far off/might not even happen) Create a web app that serves a dashboard with insights, charts, and analytics 
+  3. (Very far off) Create a web app that serves a dashboard with insights, charts, and analytics 
 
 ## Steps for testing
 
   1. Create your own MongoDB cluster - you can create a free sandbox one at https://mongodb.com/atlas or locally host
 
-  2. Add your discord bot token & MongoDB connection string to `config.py`
+  2. Add your discord bot token, MongoDB connection string, and Discord user id to `config.py`
 
   3. (Optional) Setup Virtual Environment  
      
      ```sh
-     python3 -m venv ./venv
+     python3 -m venv venv
      ```
      
   4. (Optional) Activate Virtual Environment

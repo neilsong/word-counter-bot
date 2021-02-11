@@ -12,7 +12,7 @@ class Error_Handlers(commands.Cog):
     async def on_command_error(self, ctx, exception):
         exc = exception
         if isinstance(exc, commands.NotOwner):
-            return await ctx.send("You are a not an admin of this bot.")
+            return await ctx.send("You are not an admin of this bot.")
 
         elif isinstance(exc, commands.NoPrivateMessage):
             return
@@ -26,9 +26,11 @@ class Error_Handlers(commands.Cog):
         elif isinstance(exc, discord.NotFound):
             return
 
-        elif "Missing Permissions" in str(exc):
-            return await ctx.send("I don't have the proper perms to complete this command. "
-                                  "Giving me the admin perm should fix this issue")
+        elif isinstance(exc, commands.DisabledCommand):
+            return
+
+        elif isinstance(exc, commands.MissingPermissions):
+            return await ctx.send("You don't have the permissions to execute this command.")
 
         else:
             return await ctx.send(

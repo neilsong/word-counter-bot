@@ -1,20 +1,21 @@
 from discord.ext import commands
 import discord
 def isaBotAdmin():
-    from main import allowedIds
+    from config import ADMINS
     def predicate(ctx):
-        if not str(ctx.author.id) in allowedIds:
-            raise commands.NotOwner('You are a not an admin of this bot.')
+        if not str(ctx.author.id) in ADMINS:
+            raise commands.NotOwner()
         return True
-        # a function that takes ctx as it's only arg, that returns a truethy or falsey value, or raises an exception
     return commands.check(predicate)
 
 
 
-def banFromChannel():
+def isAllowed():
+    from main import bot
     def predicate(ctx):
-        if ctx.message.channel.id == 632387107536502797:
-            raise commands.BadArgument
-        return True
-        # a function that takes ctx as it's only arg, that returns a truethy or falsey value, or raises an exception
+        try:
+            if ctx.message.channel.id in bot.blacklist[str(ctx.guild.id)]:
+                raise commands.DisabledCommand
+            else: return True
+        except: return True
     return commands.check(predicate)
