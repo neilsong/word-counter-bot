@@ -138,3 +138,5 @@ MongoDB/
 .DS_Store
 app.pid
 /.github/workflows/*
+
+config.py
