@@ -1,7 +1,7 @@
 # word-counter-bot (v0.2-alpha)
 
 Kanban: https://app.gitkraken.com/glo/board/X_1FdLw5GgAS4oFE  
-Dev: https://github.com/neilsong/word-counter-bot-dev
+Dev: https://github.com/neilsong/word-counter-bot-dev (Currently private)
 ## Description
 
 **A Python Discord Bot for Word Counting, Linguistics Analytics, and Vocabulary Insights**
